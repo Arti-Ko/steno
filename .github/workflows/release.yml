@@ -41,11 +41,28 @@ jobs:
       - name: Сборка установщика
         run: Scripts/package.sh
 
+      - name: Описание выпуска
+        run: |
+          PREVIOUS="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+          {
+            echo "## Что нового"
+            echo
+            if [ -n "$PREVIOUS" ]; then
+              git log --no-merges --pretty='- %s' "$PREVIOUS..$GITHUB_REF_NAME" \
+                | grep -vE '^- (chore|ci|test|docs|build)(\(.*\))?!?:' \
+                | sed -E 's/^- [a-z]+(\([^)]*\))?!?: /- /' || true
+            else
+              echo "- Первый выпуск"
+            fi
+            echo
+            cat .github/release-notes.md
+          } > dist/notes.md
+          cat dist/notes.md
+
       - name: Публикация выпуска
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/Steno.dmg
             dist/Steno.zip
-          body_path: .github/release-notes.md
-          generate_release_notes: true
+          body_path: dist/notes.md
