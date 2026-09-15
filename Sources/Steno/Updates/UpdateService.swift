@@ -104,7 +104,11 @@ enum ReleaseFeed {
 /// Скачивание выпуска и подмена бандла.
 enum UpdateInstaller {
     /// Скачивает и распаковывает выпуск; возвращает путь к проверенному Steno.app.
-    static func download(_ release: ReleaseInfo, progress: @escaping @Sendable (Double) -> Void) async throws -> URL {
+    static func download(
+        _ release: ReleaseInfo,
+        expectedBundleID: String? = Bundle.main.bundleIdentifier,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws -> URL {
         let staging = FileManager.default.temporaryDirectory
             .appending(path: "steno-update-\(UUID().uuidString)", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
@@ -117,7 +121,7 @@ enum UpdateInstaller {
         let version = Bundle(url: app)
             .flatMap { $0.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String }
             .flatMap(AppVersion.init)
-        guard Bundle(url: app)?.bundleIdentifier == Bundle.main.bundleIdentifier, version == release.version else {
+        guard expectedBundleID != nil, Bundle(url: app)?.bundleIdentifier == expectedBundleID, version == release.version else {
             throw UpdateError.invalidArchive
         }
         return app
@@ -151,7 +155,8 @@ enum UpdateInstaller {
     }
 
     /// Старый бандл сначала отодвигается в сторону: если копирование не удалось, он возвращается на место.
-    private static let swapScript = """
+    /// Пятый аргумент `--no-launch` нужен тестам, чтобы не открывать приложение.
+    static let swapScript = """
     #!/bin/sh
     pid="$1"; target="$2"; staged="$3"; staging="$4"
     while kill -0 "$pid" 2>/dev/null; do sleep 0.2; done
@@ -165,7 +170,7 @@ enum UpdateInstaller {
         mv "$backup" "$target"
     fi
     /usr/bin/xattr -dr com.apple.quarantine "$target" 2>/dev/null
-    /usr/bin/open "$target"
+    [ "$5" = "--no-launch" ] || /usr/bin/open "$target"
     rm -rf "$staging"
     """
 
