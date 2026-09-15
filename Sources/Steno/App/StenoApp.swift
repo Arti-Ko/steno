@@ -11,6 +11,7 @@ struct StenoApp: App {
                 .environment(app)
                 .onAppear {
                     appDelegate.openHandler = { urls in app.newTranscription(files: urls) }
+                    appDelegate.terminationHandler = { app.updater.installPendingUpdateOnQuit() }
                 }
         }
         .defaultSize(width: 1180, height: 760)
@@ -29,6 +30,15 @@ struct StenoApp: App {
 /// applicationDidFinishLaunching здесь не реализуем: это перекрывает создание окна SwiftUI.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pendingURLs: [URL] = []
+
+    /// Выход из приложения: здесь ставится заранее скачанное обновление.
+    var terminationHandler: (@MainActor () -> Void)?
+
+    func applicationWillTerminate(_ notification: Notification) {
+        MainActor.assumeIsolated {
+            terminationHandler?()
+        }
+    }
 
     var openHandler: (([URL]) -> Void)? {
         didSet {

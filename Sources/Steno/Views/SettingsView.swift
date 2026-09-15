@@ -98,8 +98,15 @@ private struct UpdateSettings: View {
                     isOn: Binding(get: { updater.checksAutomatically }, set: { updater.setChecksAutomatically($0) })
                 )
                 .disabled(!updater.canUpdate)
+                Toggle(isOn: Binding(get: { updater.installsAutomatically }, set: { updater.setInstallsAutomatically($0) })) {
+                    Text("Устанавливать обновления автоматически")
+                    Text("Новая версия скачивается в фоне и ставится, когда вы закрываете Steno")
+                }
+                .disabled(!updater.canUpdate || !updater.checksAutomatically)
                 LabeledContent {
-                    if let release = updater.availableRelease {
+                    if case .readyToInstall(let release) = updater.phase {
+                        Button("Перезапустить сейчас") { updater.install(release) }
+                    } else if let release = updater.availableRelease {
                         Button("Установить \(release.version.description)…") { app.sheet = .update(release) }
                     } else {
                         Button("Проверить сейчас") {
@@ -130,6 +137,8 @@ private struct UpdateSettings: View {
             "Доступна версия \(release.version.description)"
         case .downloading(_, let fraction):
             "Загрузка: \(fraction.formatted(.percent.precision(.fractionLength(0))))"
+        case .readyToInstall(let release):
+            "Версия \(release.version.description) скачана и установится при выходе"
         case .installing:
             "Перезапуск…"
         case .failed(let message):

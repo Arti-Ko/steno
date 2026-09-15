@@ -73,6 +73,27 @@ enum ReleaseFeed {
         )
     }
 
+    /// Текст для окна обновления: инструкция по установке нужна на странице выпуска, но не здесь;
+    /// заголовки Markdown становятся жирными — окно показывает только строчную разметку.
+    static func displayNotes(_ markdown: String) -> String {
+        var lines: [String] = []
+        var isSkipping = false
+        for line in markdown.components(separatedBy: .newlines) {
+            if line.hasPrefix("#") {
+                let title = line.drop { $0 == "#" }.trimmingCharacters(in: .whitespaces)
+                isSkipping = title.localizedCaseInsensitiveContains("установка")
+                if !isSkipping {
+                    lines.append("**\(title)**")
+                }
+                continue
+            }
+            if !isSkipping {
+                lines.append(line)
+            }
+        }
+        return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private struct GitHubRelease: Decodable {
         struct Asset: Decodable {
             let name: String
@@ -127,15 +148,24 @@ enum UpdateInstaller {
         return app
     }
 
-    /// Запускает скрипт, который дождётся выхода приложения, заменит бандл и откроет новую версию.
+    /// Можно ли заменить запущенное приложение: это .app и в его папку разрешена запись.
+    static var canReplaceRunningApp: Bool {
+        let target = Bundle.main.bundleURL
+        return target.pathExtension == "app"
+            && FileManager.default.isWritableFile(atPath: target.deletingLastPathComponent().path)
+    }
+
+    /// Запускает скрипт, который дождётся выхода приложения и заменит бандл.
+    /// relaunch — выйти сразу и открыть новую версию; иначе замена произойдёт, когда приложение закроют.
     @MainActor
-    static func installAndRelaunch(_ stagedApp: URL) throws {
+    static func install(_ stagedApp: URL, relaunch: Bool) throws {
         let target = Bundle.main.bundleURL
         guard target.pathExtension == "app" else { throw UpdateError.notInstalledAsApp }
         let parent = target.deletingLastPathComponent()
         guard FileManager.default.isWritableFile(atPath: parent.path) else {
             throw UpdateError.notWritable(parent.path)
         }
+        guard FileManager.default.fileExists(atPath: stagedApp.path) else { throw UpdateError.invalidArchive }
 
         let staging = stagedApp.deletingLastPathComponent()
         let script = staging.appending(path: "install.sh")
@@ -149,9 +179,11 @@ enum UpdateInstaller {
             target.path,
             stagedApp.path,
             staging.path,
-        ]
+        ] + (relaunch ? [] : ["--no-launch"])
         try process.run()
-        NSApp.terminate(nil)
+        if relaunch {
+            NSApp.terminate(nil)
+        }
     }
 
     /// Старый бандл сначала отодвигается в сторону: если копирование не удалось, он возвращается на место.

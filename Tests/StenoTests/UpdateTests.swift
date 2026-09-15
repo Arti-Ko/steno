@@ -48,6 +48,12 @@ struct UpdateTests {
         }
     }
 
+    @Test("В окне обновления нет инструкции по установке, заголовки жирные")
+    func cleansNotesForUpdateWindow() {
+        let notes = "## Что нового\n\n- Быстрее импорт\n\n## Установка\n\n1. Скачайте DMG\n"
+        #expect(ReleaseFeed.displayNotes(notes) == "**Что нового**\n\n- Быстрее импорт")
+    }
+
     private func releaseJSON(tag: String = "v1.2.0", prerelease: Bool = false, assets: String? = nil) -> Data {
         let defaultAssets = #"""
         [{"name":"Steno.dmg","browser_download_url":"https://github.com/Arti-Ko/steno/releases/download/v1.2.0/Steno.dmg","size":2000},

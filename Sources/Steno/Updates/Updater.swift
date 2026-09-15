@@ -1,5 +1,6 @@
 import AppKit
 import Observation
+import os
 
 /// Проверка выпусков на GitHub и установка обновлений.
 @MainActor
@@ -11,6 +12,8 @@ final class Updater {
         case upToDate
         case available(ReleaseInfo)
         case downloading(ReleaseInfo, Double)
+        /// Скачано и установится при выходе из приложения.
+        case readyToInstall(ReleaseInfo)
         case installing(ReleaseInfo)
         case failed(String)
     }
@@ -18,20 +21,26 @@ final class Updater {
     private(set) var phase: Phase = .idle
     private(set) var lastCheck: Date?
     private(set) var checksAutomatically: Bool
+    private(set) var installsAutomatically: Bool
     let currentVersion = AppVersion.current
 
-    /// Автоматическая проверка нашла версию, которую пользователь ещё не пропускал.
+    /// Найдена версия, о которой нужно спросить пользователя.
     @ObservationIgnored var onUpdateFound: ((ReleaseInfo) -> Void)?
     @ObservationIgnored private var scheduleTask: Task<Void, Never>?
     @ObservationIgnored private var downloadTask: Task<Void, Never>?
+    @ObservationIgnored private var stagedApp: URL?
+    @ObservationIgnored private let logger = Logger(subsystem: "org.sleepycoffee.steno", category: "updates")
 
-    private static let automaticKey = "checkForUpdatesAutomatically"
+    private static let checkKey = "checkForUpdatesAutomatically"
+    private static let installKey = "installUpdatesAutomatically"
     private static let skippedKey = "skippedUpdateVersion"
     private static let launchDelay: Duration = .seconds(8)
     private static let checkInterval: Duration = .seconds(6 * 3600)
 
     init() {
-        checksAutomatically = UserDefaults.standard.object(forKey: Self.automaticKey) as? Bool ?? true
+        let defaults = UserDefaults.standard
+        checksAutomatically = defaults.object(forKey: Self.checkKey) as? Bool ?? true
+        installsAutomatically = defaults.object(forKey: Self.installKey) as? Bool ?? true
         reschedule()
     }
 
@@ -42,8 +51,10 @@ final class Updater {
 
     var availableRelease: ReleaseInfo? {
         switch phase {
-        case .available(let release), .downloading(let release, _), .installing(let release): release
-        default: nil
+        case .available(let release), .downloading(let release, _), .readyToInstall(let release), .installing(let release):
+            release
+        default:
+            nil
         }
     }
 
@@ -56,11 +67,22 @@ final class Updater {
 
     func setChecksAutomatically(_ enabled: Bool) {
         checksAutomatically = enabled
-        UserDefaults.standard.set(enabled, forKey: Self.automaticKey)
+        UserDefaults.standard.set(enabled, forKey: Self.checkKey)
         reschedule()
     }
 
+    func setInstallsAutomatically(_ enabled: Bool) {
+        installsAutomatically = enabled
+        UserDefaults.standard.set(enabled, forKey: Self.installKey)
+    }
+
     func check(userInitiated: Bool) async {
+        if case .readyToInstall(let release) = phase {
+            if userInitiated {
+                onUpdateFound?(release)
+            }
+            return
+        }
         guard !isBusy else { return }
         phase = .checking
         do {
@@ -76,20 +98,57 @@ final class Updater {
                 }
                 return
             }
-            phase = .available(release)
-            let skipped = UserDefaults.standard.string(forKey: Self.skippedKey)
-            if userInitiated || skipped != release.version.description {
-                onUpdateFound?(release)
+
+            let isSkipped = UserDefaults.standard.string(forKey: Self.skippedKey) == release.version.description
+            if !userInitiated, isSkipped {
+                phase = .available(release)
+                return
             }
+            if !userInitiated, installsAutomatically, UpdateInstaller.canReplaceRunningApp {
+                download(release, relaunchWhenReady: false)
+                return
+            }
+            phase = .available(release)
+            onUpdateFound?(release)
         } catch {
             phase = .failed(error.localizedDescription)
+            logger.error("Проверка обновлений: \(error.localizedDescription)")
             if userInitiated {
                 showAlert(title: "Не удалось проверить обновления", message: error.localizedDescription)
             }
         }
     }
 
+    /// Скачать, если ещё не скачано, и сразу перезапуститься в новую версию.
     func install(_ release: ReleaseInfo) {
+        if case .readyToInstall(let ready) = phase, ready == release, let stagedApp {
+            relaunch(into: stagedApp, release: release)
+            return
+        }
+        download(release, relaunchWhenReady: true)
+    }
+
+    /// Вызывается при выходе: заранее скачанное обновление ставится без повторного запуска.
+    func installPendingUpdateOnQuit() {
+        guard case .readyToInstall = phase, let stagedApp else { return }
+        do {
+            try UpdateInstaller.install(stagedApp, relaunch: false)
+        } catch {
+            logger.error("Установка при выходе: \(error.localizedDescription)")
+        }
+    }
+
+    func cancelDownload() {
+        downloadTask?.cancel()
+    }
+
+    func skip(_ release: ReleaseInfo) {
+        UserDefaults.standard.set(release.version.description, forKey: Self.skippedKey)
+    }
+
+    // MARK: Внутреннее
+
+    private func download(_ release: ReleaseInfo, relaunchWhenReady: Bool) {
         guard downloadTask == nil else { return }
         phase = .downloading(release, 0)
         downloadTask = Task { [weak self] in
@@ -101,21 +160,27 @@ final class Updater {
                     }
                 }
                 try Task.checkCancellation()
-                self?.phase = .installing(release)
-                try UpdateInstaller.installAndRelaunch(app)
+                self?.stagedApp = app
+                if relaunchWhenReady {
+                    self?.relaunch(into: app, release: release)
+                } else {
+                    self?.phase = .readyToInstall(release)
+                }
             } catch {
                 self?.phase = Task.isCancelled ? .available(release) : .failed(error.localizedDescription)
+                self?.logger.error("Загрузка обновления: \(error.localizedDescription)")
             }
             self?.downloadTask = nil
         }
     }
 
-    func cancelDownload() {
-        downloadTask?.cancel()
-    }
-
-    func skip(_ release: ReleaseInfo) {
-        UserDefaults.standard.set(release.version.description, forKey: Self.skippedKey)
+    private func relaunch(into app: URL, release: ReleaseInfo) {
+        phase = .installing(release)
+        do {
+            try UpdateInstaller.install(app, relaunch: true)
+        } catch {
+            phase = .failed(error.localizedDescription)
+        }
     }
 
     private func reschedule() {

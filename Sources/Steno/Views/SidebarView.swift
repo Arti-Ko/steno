@@ -29,7 +29,16 @@ struct SidebarView: View {
         }
         .safeAreaInset(edge: .bottom) {
             VStack(alignment: .leading, spacing: 10) {
-                if let release = app.updater.availableRelease {
+                if case .readyToInstall(let release) = app.updater.phase {
+                    Button {
+                        app.updater.install(release)
+                    } label: {
+                        Label("Перезапустить для версии \(release.version.description)", systemImage: "arrow.clockwise.circle.fill")
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.tint)
+                    .help("Обновление уже скачано и само установится при выходе из Steno")
+                } else if let release = app.updater.availableRelease {
                     Button {
                         app.sheet = .update(release)
                     } label: {
