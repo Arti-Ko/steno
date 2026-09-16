@@ -94,6 +94,15 @@ final class LibraryStore {
         }
     }
 
+    /// Переименовывает запись. Пробелы по краям убираются, пустое название не сохраняется.
+    @discardableResult
+    func rename(_ id: UUID, to title: String) -> Bool {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        update(id) { $0.title = trimmed }
+        return true
+    }
+
     func move(_ ids: Set<UUID>, to folderID: UUID?) {
         for id in ids {
             update(id) { $0.folderID = folderID }

@@ -88,6 +88,8 @@ final class AppModel {
     var errorMessage: String?
     /// Файлы, брошенные на окно или Dock, пока лист импорта уже открыт.
     var incomingFiles: [URL] = []
+    /// Запись, название которой сейчас редактируется в списке.
+    var renamingTranscriptID: UUID?
 
     @ObservationIgnored private var keyMonitor: Any?
     private static let optionsKey = "defaultTranscriptionOptions"
@@ -236,6 +238,15 @@ final class AppModel {
         }
         library.delete(ids)
         selection.subtract(ids)
+    }
+
+    /// Завершает переименование в списке; nil — отмена.
+    func finishRename(_ id: UUID, to title: String?) {
+        guard renamingTranscriptID == id else { return }
+        renamingTranscriptID = nil
+        if let title {
+            library.rename(id, to: title)
+        }
     }
 
     func revealInFinder(_ id: UUID) {

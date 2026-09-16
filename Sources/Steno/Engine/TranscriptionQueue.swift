@@ -124,7 +124,8 @@ final class TranscriptionQueue {
                 if source.url != playbackURL {
                     item.videoPath = playableVideo ? source.url.path : nil
                 }
-                if let title = source.title, !title.isEmpty {
+                // Название из yt-dlp ставим, только если запись не успели переименовать: до этого её название — сама ссылка.
+                if let title = source.title, !title.isEmpty, item.title == transcript.sourceReference {
                     item.title = title
                 }
             }

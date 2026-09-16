@@ -41,9 +41,9 @@ struct TranscriptDetailView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(transcript.title)
-                            .font(.title2.weight(.semibold))
-                            .textSelection(.enabled)
+                        EditableTitle(title: transcript.title) { newTitle in
+                            _ = app.library.rename(transcript.id, to: newTitle)
+                        }
                         Text(subtitle)
                             .font(.callout)
                             .foregroundStyle(.secondary)
@@ -267,6 +267,49 @@ struct TranscriptDetailView: View {
             }
             item.segments[index].speaker = speaker
         }
+    }
+}
+
+// MARK: - Заголовок
+
+/// Название записи правится прямо в заголовке, как название заметки.
+private struct EditableTitle: View {
+    let title: String
+    let onCommit: (String) -> Void
+
+    @State private var draft = ""
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        TextField("Название", text: $draft, axis: .vertical)
+            .textFieldStyle(.plain)
+            .font(.title2.weight(.semibold))
+            .focused($isFocused)
+            .onAppear { draft = title }
+            .onChange(of: title) { _, newTitle in
+                if !isFocused { draft = newTitle }
+            }
+            .onSubmit(commit)
+            .onChange(of: isFocused) { _, focused in
+                if !focused { commit() }
+            }
+            .onExitCommand {
+                draft = title
+                isFocused = false
+            }
+            .help("Нажмите, чтобы переименовать")
+    }
+
+    private func commit() {
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            draft = title
+            return
+        }
+        if trimmed != title {
+            onCommit(trimmed)
+        }
+        draft = trimmed
     }
 }
 

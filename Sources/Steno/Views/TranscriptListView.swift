@@ -9,15 +9,25 @@ struct TranscriptListView: View {
         let transcripts = app.visibleTranscripts
         List(selection: $app.selection) {
             ForEach(transcripts) { transcript in
-                TranscriptRow(transcript: transcript, progress: app.queue.progress[transcript.id])
-                    .tag(transcript.id)
-                    .draggable(transcript.id.uuidString)
+                TranscriptRow(
+                    transcript: transcript,
+                    progress: app.queue.progress[transcript.id],
+                    isRenaming: app.renamingTranscriptID == transcript.id,
+                    onRename: { app.finishRename(transcript.id, to: $0) }
+                )
+                .tag(transcript.id)
+                .draggable(transcript.id.uuidString)
             }
         }
         .navigationTitle(title)
         .searchable(text: $app.searchText, prompt: "Название или фраза")
         .contextMenu(forSelectionType: UUID.self) { ids in
             menu(for: ids)
+        } primaryAction: { ids in
+            // Двойной щелчок или Return по записи — переименование, как в Finder.
+            if ids.count == 1, let id = ids.first {
+                app.renamingTranscriptID = id
+            }
         }
         .onDeleteCommand {
             pendingDeletion = app.selection
@@ -88,6 +98,7 @@ struct TranscriptListView: View {
                 Button("Расшифровать заново") { ids.forEach { app.retranscribe($0) } }
             }
             if items.count == 1, let item = items.first {
+                Button("Переименовать") { app.renamingTranscriptID = item.id }
                 Button("Показать в Finder") { app.revealInFinder(item.id) }
             }
             Divider()
@@ -99,6 +110,12 @@ struct TranscriptListView: View {
 private struct TranscriptRow: View {
     let transcript: Transcript
     let progress: JobProgress?
+    let isRenaming: Bool
+    /// Новое название или nil, если переименование отменили.
+    let onRename: (String?) -> Void
+
+    @State private var draft = ""
+    @FocusState private var isFieldFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -106,9 +123,25 @@ private struct TranscriptRow: View {
                 Image(systemName: sourceSymbol)
                     .foregroundStyle(.secondary)
                     .imageScale(.small)
-                Text(transcript.title)
-                    .fontWeight(.medium)
-                    .lineLimit(1)
+                if isRenaming {
+                    TextField("Название", text: $draft)
+                        .textFieldStyle(.plain)
+                        .fontWeight(.medium)
+                        .focused($isFieldFocused)
+                        .task {
+                            draft = transcript.title
+                            isFieldFocused = true
+                        }
+                        .onSubmit { onRename(draft) }
+                        .onExitCommand { onRename(nil) }
+                        .onChange(of: isFieldFocused) { _, focused in
+                            if !focused { onRename(draft) }
+                        }
+                } else {
+                    Text(transcript.title)
+                        .fontWeight(.medium)
+                        .lineLimit(1)
+                }
                 Spacer(minLength: 4)
                 Text(transcript.createdAt, format: .dateTime.day().month(.abbreviated))
                     .font(.caption)
