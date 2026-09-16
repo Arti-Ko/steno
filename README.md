@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/icon.png" width="128" alt="Иконка Steno">
+
 # Steno
 
 **Расшифровка встреч, интервью и лекций прямо на Mac. Файлы никуда не уходят.**
