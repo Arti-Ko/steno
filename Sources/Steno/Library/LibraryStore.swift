@@ -27,7 +27,12 @@ final class LibraryStore {
     }()
 
     nonisolated static var defaultRootURL: URL {
-        URL.applicationSupportDirectory.appending(path: "Steno", directoryHint: .isDirectory)
+        // STENO_LIBRARY_ROOT уводит библиотеку в отдельную папку — нужно для демонстраций и тестов,
+        // чтобы запуск не трогал настоящие записи.
+        if let custom = ProcessInfo.processInfo.environment["STENO_LIBRARY_ROOT"], !custom.isEmpty {
+            return URL(filePath: custom, directoryHint: .isDirectory)
+        }
+        return URL.applicationSupportDirectory.appending(path: "Steno", directoryHint: .isDirectory)
     }
 
     init(rootURL: URL = LibraryStore.defaultRootURL) {
