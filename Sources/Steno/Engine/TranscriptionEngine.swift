@@ -54,16 +54,7 @@ actor TranscriptionEngine {
         try Task.checkCancellation()
 
         report(.transcribing, 0)
-        let decoding = DecodingOptions(
-            task: .transcribe,
-            language: options.language,
-            temperatureFallbackCount: options.mode.temperatureFallbackCount,
-            usePrefillPrompt: true,
-            detectLanguage: options.language == nil,
-            skipSpecialTokens: true,
-            wordTimestamps: true,
-            chunkingStrategy: .vad
-        )
+        let decoding = Self.decodingOptions(for: options)
         // WhisperKit заполняет Progress только когда режет запись на окна; до этого процент неизвестен.
         let poller = Task.detached {
             while !Task.isCancelled {
@@ -152,6 +143,24 @@ actor TranscriptionEngine {
                 SpeakerTurn(start: Double(segment.startTime), end: Double(segment.endTime), speaker: $0)
             }
         }
+    }
+
+    /// Порог уверенности в первом токене окна выключен. Это эвристика WhisperKit, которой нет в Whisper:
+    /// окно режется по паузе, первым токеном идёт метка начала речи, и модель в ней законно не уверена.
+    /// С порогом −1,5 окно обрывалось на первом токене, все попытки отката тоже, и из записи
+    /// встречи пропадало до 80% речи — случайно, от запуска к запуску по-разному.
+    static func decodingOptions(for options: TranscriptionOptions) -> DecodingOptions {
+        DecodingOptions(
+            task: .transcribe,
+            language: options.language,
+            temperatureFallbackCount: options.mode.temperatureFallbackCount,
+            usePrefillPrompt: true,
+            detectLanguage: options.language == nil,
+            skipSpecialTokens: true,
+            wordTimestamps: true,
+            firstTokenLogProbThreshold: nil,
+            chunkingStrategy: .vad
+        )
     }
 
     private static func dominantLanguage(_ results: [TranscriptionResult]) -> String? {
